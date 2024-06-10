@@ -1,33 +1,19 @@
-'''
-python -W ignore run.py
-python block_core.py
-find -type d -name 'pymp*' -exec rm -r {} \;
-'''
-
 import torch
 import torch.nn as nn
-from tokenizers import AddedToken
-from transformers import CLIPModel, VideoMAEModel, Wav2Vec2Model, VideoMAEConfig, CLIPConfig, Wav2Vec2Config, XLMRobertaConfig
-from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig, AutoModelForSeq2SeqLM
+from transformers import XLMRobertaTokenizerFast, XLMRobertaModel
 from model.additional_modules import LSTM_fc, FC_head, Gate_Attention
-from argparse import Namespace 
 from model.model import Multimodal_LLM
 from data.dataset import CustomDataset
 from iteration import train_model, train_one_epoch, validate
 from torch.utils.data import DataLoader
 import pandas as pd
 import numpy as np
-from copy import deepcopy
 from sklearn.model_selection import train_test_split
-from transformers import BertTokenizer, AlbertTokenizer, XLMRobertaTokenizerFast, PreTrainedTokenizerFast #only for gpt2 and assign values
-from transformers import GPT2Model, BertModel, AlbertModel, XLMRobertaModel
-import pickle
-from tqdm import tqdm
 import warnings
 warnings.filterwarnings('ignore')
-import os
 
-tasks_bool = {"offensive" : True, "offensive_level": True, "sentiment" : True}
+# Define task-related configurations
+tasks_bool = {"offensive": True, "offensive_level": True, "sentiment": True}
 tasks = []
 name = "gpt2_vidmae_whisper_"
 
@@ -35,18 +21,19 @@ for k, v in tasks_bool.items():
     if tasks_bool[k]:
         tasks.append(k)
         name += k + "_"
-        
+
+# Configuration Namespace
 config = Namespace(
     file_name=name + "0",
-    device=torch.device("cuda:1"),
+    device=torch.device("cuda:0" if torch.cuda.is_available() else "cpu"),
     tokenizer_path="ckpts",
-    tasks = tasks,
-    offensive_bool = tasks_bool["offensive"],
-    offensive_level_bool = tasks_bool["offensive_level"],
-    sentiment_bool = tasks_bool["sentiment"],
+    tasks=tasks,
+    offensive_bool=tasks_bool["offensive"],
+    offensive_level_bool=tasks_bool["offensive_level"],
+    sentiment_bool=tasks_bool["sentiment"],
     video_encoder="MCG-NJU/videomae-base",
     audio_encoder="openai/whisper-small",
-    lstm_or_conv = False,
+    lstm_or_conv=False,
     image_conv_kernel=23,
     image_conv_stride=3,
     image_conv_padding=8,
@@ -71,33 +58,30 @@ config = Namespace(
     min_mm_seq_len=64,
     lstm_num_layers=1,
     tokenizer_max_len=128,
-    add_pooling = False,
+    add_pooling=False,
     train=True,
-    directory = "checkpoints/",
-    results_directory = "results/"
+    directory="checkpoints/",
+    results_directory="results/"
 )
 
-df = pd.read_csv("final_data/final_processed_data_one_hot.csv")
+# Load dataset
+df = pd.read_csv("/mnt/data/final_processed_data_one_hot.csv")
 df_train_val, df_test = train_test_split(df, test_size=0.1, random_state=28703)
 df_train, df_val = train_test_split(df_train_val, test_size=0.1, random_state=28703)
 
+# Set training parameters
 num_epochs = 30
 patience = 10
 batch_size = 2
 
-#for roberta
+# Initialize tokenizer and model
 tokenizer = XLMRobertaTokenizerFast.from_pretrained("l3cube-pune/hing-roberta")
 model = XLMRobertaModel.from_pretrained("l3cube-pune/hing-roberta", torch_dtype=torch.float32)
 
-#for gpt2
-# tokenizer = PreTrainedTokenizerFast.from_pretrained('l3cube-pune/hing-gpt')
-# model = GPT2Model.from_pretrained('l3cube-pune/hing-gpt', torch_dtype=torch.float32)
-# tokenizer.bos_token_id = 1
-# tokenizer.eos_token_id = 2
-
-
+# Initialize Multimodal LLM
 model = Multimodal_LLM(batch_size=batch_size, config=config, tokenizer=tokenizer, adapter_llm=model)
 
+# Prepare datasets and dataloaders
 train_ds = CustomDataset(dataframe=df_train, train=True, tokenizer=tokenizer)
 val_ds = CustomDataset(df_val, train=True, tokenizer=tokenizer)
 test_ds = CustomDataset(df_test, train=False, tokenizer=tokenizer)
@@ -106,5 +90,5 @@ train_dataloader = DataLoader(train_ds, batch_size=batch_size, num_workers=16, s
 val_dataloader = DataLoader(val_ds, batch_size=batch_size, num_workers=16)
 test_dataloader = DataLoader(test_ds, batch_size=batch_size, num_workers=16)
 
-
+# Train model
 train_model(model, train_dataloader, val_dataloader, config, num_epochs, "offensive", "f1", devices=None)
